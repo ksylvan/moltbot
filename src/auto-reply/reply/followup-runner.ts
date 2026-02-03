@@ -27,7 +27,8 @@ import { persistSessionUsageUpdate } from "./session-usage.js";
 import { createTypingSignaler } from "./typing-mode.js";
 
 /**
- * Creates a payload key for deduplication (text + media).
+ * Creates a payload key for deduplication.
+ * Includes all fields that affect delivery semantics to avoid incorrect deduplication.
  */
 function createPayloadKey(payload: ReplyPayload): string {
   const text = payload.text?.trim() ?? "";
@@ -36,7 +37,16 @@ function createPayloadKey(payload: ReplyPayload): string {
     : payload.mediaUrl
       ? [payload.mediaUrl]
       : [];
-  return JSON.stringify({ text, mediaList });
+  return JSON.stringify({
+    text,
+    mediaList,
+    replyToId: payload.replyToId,
+    replyToTag: payload.replyToTag,
+    replyToCurrent: payload.replyToCurrent,
+    audioAsVoice: payload.audioAsVoice,
+    isError: payload.isError,
+    channelData: payload.channelData,
+  });
 }
 
 export function createFollowupRunner(params: {
@@ -163,9 +173,8 @@ export function createFollowupRunner(params: {
               return;
             }
 
-            // Track this payload to avoid double-sending in final payloads.
             const payloadKey = createPayloadKey(payload);
-            streamedPayloadKeys.add(payloadKey);
+            let delivered = false;
 
             await typingSignals.signalTextDelta(payload.text);
 
@@ -180,16 +189,25 @@ export function createFollowupRunner(params: {
                 threadId: queued.originatingThreadId,
                 cfg: queued.run.config,
               });
-              if (!result.ok) {
+              if (result.ok) {
+                delivered = true;
+              } else {
                 const errorMsg = result.error ?? "unknown error";
                 logVerbose(`followup queue: streaming route-reply failed: ${errorMsg}`);
                 // Fallback: try the dispatcher if routing failed.
                 if (opts?.onBlockReply) {
                   await opts.onBlockReply(payload);
+                  delivered = true;
                 }
               }
             } else if (opts?.onBlockReply) {
               await opts.onBlockReply(payload);
+              delivered = true;
+            }
+
+            // Only mark as sent after successful delivery to avoid dropping payloads.
+            if (delivered) {
+              streamedPayloadKeys.add(payloadKey);
             }
           }
         : undefined;
