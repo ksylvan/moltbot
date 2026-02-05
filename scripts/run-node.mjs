@@ -107,6 +107,30 @@ const logRunner = (message) => {
   process.stderr.write(`[openclaw] ${message}\n`);
 };
 
+const writeBuildInfo = () => {
+  const buildInfoScript = spawn(
+    process.execPath,
+    ["--import", "tsx", "scripts/write-build-info.ts"],
+    {
+      cwd,
+      env,
+      stdio: "inherit",
+    },
+  );
+
+  return new Promise((resolve, reject) => {
+    buildInfoScript.on("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`Build info script killed by signal ${signal}`));
+      } else if (code !== 0 && code !== null) {
+        reject(new Error(`Build info script exited with code ${code}`));
+      } else {
+        resolve();
+      }
+    });
+  });
+};
+
 const runNode = () => {
   const nodeProcess = spawn(process.execPath, ["openclaw.mjs", ...args], {
     cwd,
@@ -153,6 +177,13 @@ if (!shouldBuild()) {
       process.exit(code);
     }
     writeBuildStamp();
-    runNode();
+    void (async () => {
+      try {
+        await writeBuildInfo();
+      } catch (err) {
+        logRunner(`write-build-info failed: ${err?.message ?? "unknown error"}`);
+      }
+      runNode();
+    })();
   });
 }
