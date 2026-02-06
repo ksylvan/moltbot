@@ -119,6 +119,7 @@ const writeBuildInfo = () => {
   );
 
   return new Promise((resolve, reject) => {
+    buildInfoScript.on("error", reject);
     buildInfoScript.on("exit", (code, signal) => {
       if (signal) {
         reject(new Error(`Build info script killed by signal ${signal}`));
