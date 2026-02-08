@@ -633,4 +633,95 @@ describe("subscribeEmbeddedPiSession — multi-content-block streaming", () => {
     expect(block0Events.length).toBeGreaterThan(0);
     expect(block0Events[block0Events.length - 1].data.text).toBe("Let me check both in parallel.");
   });
+
+  it("emits cumulative text with \\n\\n separator across message boundaries (tool-use then new message)", () => {
+    let handler: SessionEventHandler | undefined;
+    const session: StubSession = {
+      subscribe: (fn) => {
+        handler = fn;
+        return () => {};
+      },
+    };
+
+    const onAgentEvent = vi.fn();
+
+    subscribeEmbeddedPiSession({
+      session: session as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"],
+      runId: "run",
+      onAgentEvent,
+      blockReplyBreak: "text_end",
+    });
+
+    // --- Message 1: narration text + tool_use ---
+    handler?.({ type: "message_start", message: { role: "assistant" } });
+
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: "Let me run all three lookups in parallel.",
+        contentIndex: 0,
+      },
+    });
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_end",
+        content: "Let me run all three lookups in parallel.",
+        contentIndex: 0,
+      },
+    });
+
+    // message_end for message 1 (has tool_use)
+    handler?.({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Let me run all three lookups in parallel." },
+          { type: "tool_use", id: "tool_1", name: "bash", input: {} },
+        ],
+      },
+    });
+
+    // --- Tool results processed by the agent framework ---
+    // (These would be tool_execution_start/end events, not relevant here)
+
+    // --- Message 2: results after tool calls ---
+    handler?.({ type: "message_start", message: { role: "assistant" } });
+
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: "Here are all three:",
+        contentIndex: 0,
+      },
+    });
+
+    // Collect all agent event emissions
+    const assistantEvents = onAgentEvent.mock.calls
+      .map((call) => call[0])
+      .filter(
+        (evt): evt is { stream: string; data: { text: string; delta: string } } =>
+          evt?.stream === "assistant" && typeof evt?.data?.text === "string",
+      );
+
+    // The last agent event's cumulative text should contain BOTH messages
+    // separated by "\n\n" (from resetAssistantMessageState at message_start)
+    const lastEvent = assistantEvents[assistantEvents.length - 1];
+    expect(lastEvent.data.text).toContain("Let me run all three lookups in parallel.");
+    expect(lastEvent.data.text).toContain("Here are all three:");
+
+    // The separator between messages should be "\n\n", NOT empty
+    expect(lastEvent.data.text).toBe(
+      "Let me run all three lookups in parallel.\n\nHere are all three:",
+    );
+
+    // Crucially: NO smashing of period and next word
+    expect(lastEvent.data.text).not.toContain("parallel.Here");
+  });
 });

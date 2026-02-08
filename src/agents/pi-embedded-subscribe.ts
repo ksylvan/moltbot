@@ -57,6 +57,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     lastAssistantTextNormalized: undefined,
     lastAssistantTextTrimmed: undefined,
     assistantTextBaseline: 0,
+    lastAssistantTextsMessageIndex: -1, // tracks which message the last assistantTexts push came from
     suppressBlockChunks: false, // Avoid late chunk inserts after final text merge.
     currentTextContentIndex: -1,
     cumulativeStreamedText: "",
@@ -148,6 +149,21 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     if (shouldSkipAssistantText(text)) {
       return;
     }
+    // Ensure cross-message separation: when we're pushing text from a
+    // different assistant message than the previous push, prepend "\n\n"
+    // so that consuming code (final reply payloads, raw stream, etc.)
+    // preserves whitespace between assistant turns.
+    if (
+      assistantTexts.length > 0 &&
+      state.lastAssistantTextsMessageIndex >= 0 &&
+      state.lastAssistantTextsMessageIndex < state.assistantMessageIndex
+    ) {
+      const last = assistantTexts[assistantTexts.length - 1];
+      if (last && !last.endsWith("\n\n")) {
+        text = "\n\n" + text;
+      }
+    }
+    state.lastAssistantTextsMessageIndex = state.assistantMessageIndex;
     assistantTexts.push(text);
     rememberAssistantText(text);
   };
@@ -435,8 +451,23 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     }
 
     state.lastBlockReplyText = chunk;
-    assistantTexts.push(chunk);
-    rememberAssistantText(chunk);
+    // Ensure cross-message separation (same logic as pushAssistantText):
+    // only add "\n\n" when crossing a message boundary, not for
+    // within-message chunk splits.
+    let textForArray = chunk;
+    if (
+      assistantTexts.length > 0 &&
+      state.lastAssistantTextsMessageIndex >= 0 &&
+      state.lastAssistantTextsMessageIndex < state.assistantMessageIndex
+    ) {
+      const last = assistantTexts[assistantTexts.length - 1];
+      if (last && !last.endsWith("\n\n")) {
+        textForArray = "\n\n" + chunk;
+      }
+    }
+    state.lastAssistantTextsMessageIndex = state.assistantMessageIndex;
+    assistantTexts.push(textForArray);
+    rememberAssistantText(textForArray);
     if (!params.onBlockReply) {
       return;
     }

@@ -47,6 +47,7 @@ export type EmbeddedPiSubscribeState = {
   lastAssistantTextNormalized?: string;
   lastAssistantTextTrimmed?: string;
   assistantTextBaseline: number;
+  lastAssistantTextsMessageIndex: number;
   suppressBlockChunks: boolean;
   currentTextContentIndex: number;
   cumulativeStreamedText: string;

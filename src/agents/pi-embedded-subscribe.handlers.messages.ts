@@ -34,12 +34,22 @@ export function handleMessageStart(
   evt: AgentEvent & { message: AgentMessage },
 ) {
   const msg = evt.message;
+  // [DIAG-MSG-START] Log ALL message_start events for debugging separator issue
+  appendRawStream({
+    ts: Date.now(),
+    event: "diag_message_start",
+    runId: ctx.params.runId,
+    sessionId: (ctx.params.session as { id?: string }).id,
+    role: msg?.role,
+    cumulativeLength: ctx.state.cumulativeStreamedText.length,
+    assistantTextsCount: ctx.state.assistantTexts.length,
+  });
   if (msg?.role !== "assistant") {
     return;
   }
 
   // KNOWN: Resetting at `text_end` is unsafe (late/duplicate end events).
-  // ASSUME: `message_start` is the only reliable boundary for “new assistant message begins”.
+  // ASSUME: `message_start` is the only reliable boundary for "new assistant message begins".
   // Start-of-message is a safer reset point than message_end: some providers
   // may deliver late text_end updates after message_end, which would otherwise
   // re-trigger block replies.
@@ -331,6 +341,22 @@ export function handleMessageEnd(
   evt: AgentEvent & { message: AgentMessage },
 ) {
   const msg = evt.message;
+  // [DIAG-MSG-END] Log ALL message_end events
+  const msgAny = msg as unknown as Record<string, unknown> | undefined;
+  const contentArr = Array.isArray(msgAny?.content)
+    ? (msgAny!.content as Array<{ type?: string }>)
+    : [];
+  appendRawStream({
+    ts: Date.now(),
+    event: "diag_message_end",
+    runId: ctx.params.runId,
+    sessionId: (ctx.params.session as { id?: string }).id,
+    role: msg?.role,
+    contentBlockCount: contentArr.length,
+    contentTypes: contentArr.map((b) => b.type),
+    cumulativeLength: ctx.state.cumulativeStreamedText.length,
+    assistantTextsCount: ctx.state.assistantTexts.length,
+  });
   if (msg?.role !== "assistant") {
     return;
   }
