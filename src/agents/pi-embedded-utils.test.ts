@@ -255,7 +255,7 @@ describe("extractAssistantText", () => {
     };
 
     const result = extractAssistantText(msg);
-    expect(result).toBe("First block.\nThird block.");
+    expect(result).toBe("First block.\n\nThird block.");
   });
 
   it("strips downgraded Gemini tool call text representations", () => {
@@ -377,7 +377,7 @@ File contents here`,
     };
 
     const result = extractAssistantText(msg);
-    expect(result).toBe("Here's what I found:\nDone checking.");
+    expect(result).toBe("Here's what I found:\n\nDone checking.");
   });
 
   it("strips thinking tags from text content", () => {

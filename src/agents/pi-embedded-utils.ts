@@ -217,7 +217,7 @@ export function extractAssistantText(msg: AssistantMessage): string {
         )
         .filter(Boolean)
     : [];
-  const extracted = blocks.join("\n").trim();
+  const extracted = blocks.join("\n\n").trim();
   return sanitizeUserFacingText(extracted);
 }
 

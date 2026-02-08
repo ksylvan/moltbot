@@ -202,11 +202,11 @@ export function handleMessageUpdate(
       final: false,
       inlineCode: createInlineCodeState(),
     };
-    // Insert a newline separator in the cumulative text buffer so that text from
-    // different content blocks doesn't smash together (matching the "\n" join that
-    // extractAssistantText uses at message_end).
+    // Insert a double-newline separator in the cumulative text buffer so that text
+    // from different content blocks doesn't smash together (matching the "\n\n" join
+    // that extractAssistantText uses at message_end).
     if (ctx.state.cumulativeStreamedText.length > 0) {
-      ctx.state.cumulativeStreamedText += "\n";
+      ctx.state.cumulativeStreamedText += "\n\n";
     }
     // Note: blockState is NOT reset here — it tracks cumulative tag state across
     // the entire message (e.g. a <think> opened in block 1 must still be tracked
@@ -384,7 +384,7 @@ export function handleMessageEnd(
     const apiTextBlocks = blocks
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text);
-    const apiFullText = apiTextBlocks.join("\n");
+    const apiFullText = apiTextBlocks.join("\n\n");
     const deltaBuffer = ctx.state.deltaBuffer;
     const cumText = ctx.state.cumulativeStreamedText;
     // Check if deltaBuffer matches the last text block (for single-block messages)
