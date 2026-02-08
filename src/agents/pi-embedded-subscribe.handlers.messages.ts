@@ -208,11 +208,19 @@ export function handleMessageUpdate(
     ctx.state.lastStreamedAssistantCleaned = cleanedText;
 
     if (shouldEmit) {
+      // Append new delta to cumulative message text so the `text` field in
+      // agent events represents ALL text emitted in this assistant message,
+      // not just the current content block.  The gateway chat layer uses
+      // `text` for its buffer and final message — per-block text would lose
+      // earlier blocks (the overlapping-messages bug).
+      ctx.state.cumulativeStreamedText += deltaText;
+      const cumulativeText = ctx.state.cumulativeStreamedText;
+
       emitAgentEvent({
         runId: ctx.params.runId,
         stream: "assistant",
         data: {
-          text: cleanedText,
+          text: cumulativeText,
           delta: deltaText,
           mediaUrls: hasMedia ? mediaUrls : undefined,
         },
@@ -220,7 +228,7 @@ export function handleMessageUpdate(
       void ctx.params.onAgentEvent?.({
         stream: "assistant",
         data: {
-          text: cleanedText,
+          text: cumulativeText,
           delta: deltaText,
           mediaUrls: hasMedia ? mediaUrls : undefined,
         },
@@ -228,7 +236,7 @@ export function handleMessageUpdate(
       ctx.state.emittedAssistantUpdate = true;
       if (ctx.params.onPartialReply && ctx.state.shouldEmitPartialReplies) {
         void ctx.params.onPartialReply({
-          text: cleanedText,
+          text: cumulativeText,
           mediaUrls: hasMedia ? mediaUrls : undefined,
         });
       }

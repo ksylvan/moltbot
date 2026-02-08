@@ -59,6 +59,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     assistantTextBaseline: 0,
     suppressBlockChunks: false, // Avoid late chunk inserts after final text merge.
     currentTextContentIndex: -1,
+    cumulativeStreamedText: "",
     lastReasoningSent: undefined,
     compactionInFlight: false,
     pendingCompactionRetry: 0,
@@ -103,6 +104,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     state.lastReasoningSent = undefined;
     state.suppressBlockChunks = false;
     state.currentTextContentIndex = -1;
+    state.cumulativeStreamedText = "";
     state.assistantMessageIndex += 1;
     state.lastAssistantTextMessageIndex = -1;
     state.lastAssistantTextNormalized = undefined;

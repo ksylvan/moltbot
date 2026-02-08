@@ -542,4 +542,94 @@ describe("subscribeEmbeddedPiSession — multi-content-block streaming", () => {
     expect(subscription.assistantTexts).toEqual(["Simple reply"]);
     expect(onBlockReply).toHaveBeenCalledTimes(1);
   });
+
+  it("emits cumulative text in agent events across content block boundaries", () => {
+    let handler: SessionEventHandler | undefined;
+    const session: StubSession = {
+      subscribe: (fn) => {
+        handler = fn;
+        return () => {};
+      },
+    };
+
+    const onAgentEvent = vi.fn();
+
+    subscribeEmbeddedPiSession({
+      session: session as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"],
+      runId: "run",
+      onAgentEvent,
+      blockReplyBreak: "text_end",
+    });
+
+    handler?.({ type: "message_start", message: { role: "assistant" } });
+
+    // Block 0: "Let me check both in parallel."
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: "Let me check both in parallel.",
+        contentIndex: 0,
+      },
+    });
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_end",
+        content: "Let me check both in parallel.",
+        contentIndex: 0,
+      },
+    });
+
+    // Tool use block (contentIndex 1) — not a text event, skipped here
+
+    // Block 2: "Here's your calendar:"
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_start",
+        delta: "",
+        content: "",
+        contentIndex: 2,
+      },
+    });
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: "Here's your calendar:",
+        contentIndex: 2,
+      },
+    });
+
+    // Collect all agent event emissions
+    const assistantEvents = onAgentEvent.mock.calls
+      .map((call) => call[0])
+      .filter(
+        (evt): evt is { stream: string; data: { text: string; delta: string } } =>
+          evt?.stream === "assistant" && typeof evt?.data?.text === "string",
+      );
+
+    // The last agent event's text field should contain ALL text from the message,
+    // not just the current block's text. This is what the gateway chat layer uses
+    // for its buffer and final message.
+    const lastEvent = assistantEvents[assistantEvents.length - 1];
+    expect(lastEvent.data.text).toContain("Let me check both in parallel.");
+    expect(lastEvent.data.text).toContain("Here's your calendar:");
+
+    // The text must be cumulative: block 0 text + block 2 text
+    expect(lastEvent.data.text).toBe("Let me check both in parallel.Here's your calendar:");
+
+    // The delta should be just the new content from block 2
+    expect(lastEvent.data.delta).toBe("Here's your calendar:");
+
+    // Earlier events from block 0 should have had per-block text at that point
+    const block0Events = assistantEvents.filter((evt) => !evt.data.text.includes("calendar"));
+    expect(block0Events.length).toBeGreaterThan(0);
+    expect(block0Events[block0Events.length - 1].data.text).toBe("Let me check both in parallel.");
+  });
 });
