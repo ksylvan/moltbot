@@ -81,6 +81,28 @@ export function handleMessageUpdate(
     content,
   });
 
+  // Content block boundary: when a new text_start arrives while deltaBuffer still
+  // holds content from a previous block, reset per-block accumulators so the new
+  // block streams cleanly without deduplication comparing against stale text.
+  if (evtType === "text_start" && ctx.state.deltaBuffer.length > 0) {
+    ctx.log.debug("Content block boundary: resetting deltaBuffer for new text_start");
+    if (ctx.blockChunker) {
+      ctx.blockChunker.drain({ force: true, emit: ctx.emitBlockChunk });
+      ctx.blockChunker.reset();
+    } else if (ctx.state.blockBuffer.length > 0) {
+      ctx.emitBlockChunk(ctx.state.blockBuffer);
+      ctx.state.blockBuffer = "";
+    }
+    ctx.state.deltaBuffer = "";
+    ctx.state.lastStreamedAssistantCleaned = undefined;
+    ctx.state.emittedAssistantUpdate = false;
+    ctx.state.partialBlockState = {
+      thinking: false,
+      final: false,
+      inlineCode: createInlineCodeState(),
+    };
+  }
+
   let chunk = "";
   if (evtType === "text_delta") {
     chunk = delta;
