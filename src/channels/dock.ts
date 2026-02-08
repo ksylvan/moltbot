@@ -94,9 +94,11 @@ const DOCKS: Record<ChatChannelId, ChannelDock> = {
     capabilities: {
       chatTypes: ["direct", "group", "channel", "thread"],
       nativeCommands: true,
-      blockStreaming: true,
     },
     outbound: { textChunkLimit: 4000 },
+    streaming: {
+      blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 },
+    },
     config: {
       resolveAllowFrom: ({ cfg, accountId }) =>
         (resolveTelegramAccount({ cfg, accountId }).config.allowFrom ?? []).map((entry) =>

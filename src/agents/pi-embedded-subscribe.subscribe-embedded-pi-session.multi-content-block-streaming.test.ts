@@ -621,8 +621,9 @@ describe("subscribeEmbeddedPiSession — multi-content-block streaming", () => {
     expect(lastEvent.data.text).toContain("Let me check both in parallel.");
     expect(lastEvent.data.text).toContain("Here's your calendar:");
 
-    // The text must be cumulative: block 0 text + block 2 text
-    expect(lastEvent.data.text).toBe("Let me check both in parallel.Here's your calendar:");
+    // The text must be cumulative: block 0 text + "\n" separator + block 2 text
+    // (newline matches extractAssistantText's join behavior at message_end)
+    expect(lastEvent.data.text).toBe("Let me check both in parallel.\nHere's your calendar:");
 
     // The delta should be just the new content from block 2
     expect(lastEvent.data.delta).toBe("Here's your calendar:");

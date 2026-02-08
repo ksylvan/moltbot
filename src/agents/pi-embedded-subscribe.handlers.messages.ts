@@ -130,6 +130,15 @@ export function handleMessageUpdate(
       final: false,
       inlineCode: createInlineCodeState(),
     };
+    // Insert a newline separator in the cumulative text buffer so that text from
+    // different content blocks doesn't smash together (matching the "\n" join that
+    // extractAssistantText uses at message_end).
+    if (ctx.state.cumulativeStreamedText.length > 0) {
+      ctx.log.debug(
+        `[DIAG] boundary: inserting newline separator, cumLen=${ctx.state.cumulativeStreamedText.length} cumTail=${JSON.stringify(ctx.state.cumulativeStreamedText.slice(-40))}`,
+      );
+      ctx.state.cumulativeStreamedText += "\n";
+    }
     // Note: blockState is NOT reset here — it tracks cumulative tag state across
     // the entire message (e.g. a <think> opened in block 1 must still be tracked
     // in block 2). Only partialBlockState is per-block.
@@ -215,6 +224,14 @@ export function handleMessageUpdate(
       // earlier blocks (the overlapping-messages bug).
       ctx.state.cumulativeStreamedText += deltaText;
       const cumulativeText = ctx.state.cumulativeStreamedText;
+
+      // Diagnostic: log cumulative text at block boundaries to debug overlap bug.
+      // Remove after confirming the fix works.
+      if (contentIndex >= 0) {
+        ctx.log.debug(
+          `[DIAG] emit contentIndex=${contentIndex} cumLen=${cumulativeText.length} deltaLen=${deltaText.length} cumTail=${JSON.stringify(cumulativeText.slice(-60))}`,
+        );
+      }
 
       emitAgentEvent({
         runId: ctx.params.runId,
