@@ -101,6 +101,40 @@ export function handleMessageUpdate(
   const contentIndex =
     typeof assistantRecord?.contentIndex === "number" ? assistantRecord.contentIndex : -1;
 
+  // [DIAG5] On text_start, snapshot the partial message's content blocks.
+  // This reveals whether the API sends multiple text blocks (thinking then text)
+  // that might get collapsed, or a single garbled text block from the start.
+  if (evtType === "text_start") {
+    const blocks = Array.isArray(msg.content) ? msg.content : [];
+    const blockSummary = blocks.map((b, i) => {
+      const bt = b && typeof b === "object" ? ((b as { type?: string }).type ?? "?") : "?";
+      if (bt === "text") {
+        const t = (b as { text?: string }).text ?? "";
+        return `[${i}]text:${t.length}ch:"${t.slice(0, 40).replace(/\n/g, "\\n")}"`;
+      }
+      if (bt === "thinking") {
+        const t = (b as { thinking?: string }).thinking ?? "";
+        return `[${i}]thinking:${t.length}ch`;
+      }
+      return `[${i}]${bt}`;
+    });
+    ctx.log.debug(
+      `[DIAG5] text_start contentIndex=${contentIndex} totalBlocks=${blocks.length} ${blockSummary.join(" | ")}`,
+    );
+    appendRawStream({
+      ts: Date.now(),
+      event: "diag5_text_start_snapshot",
+      runId: ctx.params.runId,
+      sessionId: (ctx.params.session as { id?: string }).id,
+      contentIndex,
+      totalBlocks: blocks.length,
+      blockTypes: blocks.map((b) =>
+        b && typeof b === "object" ? ((b as { type?: string }).type ?? "?") : "?",
+      ),
+      blockSummary,
+    });
+  }
+
   appendRawStream({
     ts: Date.now(),
     event: "assistant_text_stream",
@@ -358,20 +392,23 @@ export function handleMessageEnd(
       cumulativeFirst200: cumText.slice(0, 200),
     });
 
-    // [DIAG4] Garble detection heuristic: look for "sentence.[a-z]" pattern (period followed
-    // immediately by lowercase letter, which is a known garble signature).
-    const garblePattern = /\w\.[a-z]/;
+    // [DIAG4] Garble detection heuristic: "Let me [verb]" preamble followed by garble signature
+    // (period then lowercase/special char). Trigger whether or not delta matches API — the API
+    // itself may return a single garbled text block.
+    const startsWithLetMe = apiFullText.startsWith("Let me ");
+    const garblePattern = /\w\.\w/;
     const apiShort = apiFullText.slice(0, 500);
-    if (garblePattern.test(apiShort) && !deltaMatchesApi) {
+    const garbleDetected = startsWithLetMe && garblePattern.test(apiShort.slice(20));
+    if (garbleDetected) {
       ctx.log.debug(
-        `[DIAG4] ⚠️ GARBLE DETECTED in API text! deltaBuffer(${deltaBuffer.length}) != apiText(${apiFullText.length})`,
+        `[DIAG4] ⚠️ GARBLE DETECTED! deltaBuffer(${deltaBuffer.length}) apiText(${apiFullText.length}) deltaMatchesApi=${deltaMatchesApi}`,
       );
-      ctx.log.debug(`[DIAG4] API full text first 500: "${apiShort.replace(/\n/g, "\\n")}"`);
+      ctx.log.debug(`[DIAG4] API first 500: "${apiShort.replace(/\n/g, "\\n")}"`);
       ctx.log.debug(
-        `[DIAG4] deltaBuffer full first 500: "${deltaBuffer.slice(0, 500).replace(/\n/g, "\\n")}"`,
+        `[DIAG4] deltaBuffer first 500: "${deltaBuffer.slice(0, 500).replace(/\n/g, "\\n")}"`,
       );
       ctx.log.debug(
-        `[DIAG4] cumulative full first 500: "${cumText.slice(0, 500).replace(/\n/g, "\\n")}"`,
+        `[DIAG4] cumulative first 500: "${cumText.slice(0, 500).replace(/\n/g, "\\n")}"`,
       );
       appendRawStream({
         ts: Date.now(),
@@ -380,6 +417,8 @@ export function handleMessageEnd(
         sessionId: (ctx.params.session as { id?: string }).id,
         apiFullLength: apiFullText.length,
         deltaBufferLength: deltaBuffer.length,
+        deltaMatchesApi,
+        textBlockCount: apiTextBlocks.length,
         apiFirst500: apiShort,
         deltaFirst500: deltaBuffer.slice(0, 500),
         cumulativeFirst500: cumText.slice(0, 500),
