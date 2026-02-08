@@ -104,7 +104,14 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     state.lastReasoningSent = undefined;
     state.suppressBlockChunks = false;
     state.currentTextContentIndex = -1;
-    state.cumulativeStreamedText = "";
+    // Preserve cumulative text across assistant message boundaries so the
+    // streaming buffer grows monotonically. Without this, the gateway buffer
+    // resets on each message_start and the UI's length-guard drops shorter
+    // text, causing narration from earlier messages to vanish or smash into
+    // later messages without separators.
+    if (state.cumulativeStreamedText.length > 0) {
+      state.cumulativeStreamedText += "\n\n";
+    }
     state.assistantMessageIndex += 1;
     state.lastAssistantTextMessageIndex = -1;
     state.lastAssistantTextNormalized = undefined;
