@@ -64,6 +64,34 @@ export function handleMessageUpdate(
       : undefined;
   const evtType = typeof assistantRecord?.type === "string" ? assistantRecord.type : "";
 
+  // [DIAG3] Log ALL streaming event types (thinking, toolcall, etc.) to diagnose missing thinking blocks.
+  if (evtType && evtType !== "text_delta" && evtType !== "text_start" && evtType !== "text_end") {
+    const contentIndex =
+      typeof assistantRecord?.contentIndex === "number" ? assistantRecord.contentIndex : -1;
+    appendRawStream({
+      ts: Date.now(),
+      event: "diag3_non_text_stream_event",
+      runId: ctx.params.runId,
+      sessionId: (ctx.params.session as { id?: string }).id,
+      evtType,
+      contentIndex,
+    });
+    // Also count content blocks on the partial message for thinking diagnostics.
+    if (evtType === "thinking_end" || evtType === "thinking_start") {
+      const content = Array.isArray(msg.content) ? msg.content : [];
+      const thinkingBlocks = content.filter(
+        (b) => b && typeof b === "object" && (b as { type?: string }).type === "thinking",
+      );
+      const textBlocks = content.filter(
+        (b) => b && typeof b === "object" && (b as { type?: string }).type === "text",
+      );
+      ctx.log.debug(
+        `[DIAG3] ${evtType}: ${content.length} blocks (${thinkingBlocks.length} thinking, ${textBlocks.length} text) contentIndex=${contentIndex}`,
+      );
+    }
+    return;
+  }
+
   if (evtType !== "text_delta" && evtType !== "text_start" && evtType !== "text_end") {
     return;
   }
@@ -134,9 +162,6 @@ export function handleMessageUpdate(
     // different content blocks doesn't smash together (matching the "\n" join that
     // extractAssistantText uses at message_end).
     if (ctx.state.cumulativeStreamedText.length > 0) {
-      ctx.log.debug(
-        `[DIAG] boundary: inserting newline separator, cumLen=${ctx.state.cumulativeStreamedText.length} cumTail=${JSON.stringify(ctx.state.cumulativeStreamedText.slice(-40))}`,
-      );
       ctx.state.cumulativeStreamedText += "\n";
     }
     // Note: blockState is NOT reset here — it tracks cumulative tag state across
@@ -225,14 +250,6 @@ export function handleMessageUpdate(
       ctx.state.cumulativeStreamedText += deltaText;
       const cumulativeText = ctx.state.cumulativeStreamedText;
 
-      // Diagnostic: log cumulative text at block boundaries to debug overlap bug.
-      // Remove after confirming the fix works.
-      if (contentIndex >= 0) {
-        ctx.log.debug(
-          `[DIAG] emit contentIndex=${contentIndex} cumLen=${cumulativeText.length} deltaLen=${deltaText.length} cumTail=${JSON.stringify(cumulativeText.slice(-60))}`,
-        );
-      }
-
       emitAgentEvent({
         runId: ctx.params.runId,
         stream: "assistant",
@@ -285,6 +302,91 @@ export function handleMessageEnd(
   }
 
   const assistantMessage = msg;
+
+  // [DIAG2] Log content block structure BEFORE promoteThinkingTagsToBlocks.
+  // This diagnostic captures whether the API returned thinking blocks and whether
+  // the accumulated deltaBuffer matches the API's text content.
+  if (Array.isArray(assistantMessage.content)) {
+    const blocks = assistantMessage.content;
+    const blockSummary = blocks.map((b, i) => {
+      if (b.type === "text") {
+        return `[${i}]text:${b.text.length}ch:"${b.text.slice(0, 60).replace(/\n/g, "\\n")}..."`;
+      }
+      if (b.type === "thinking") {
+        return `[${i}]thinking:${b.thinking.length}ch`;
+      }
+      if (b.type === "toolCall") {
+        return `[${i}]toolCall:${b.name}`;
+      }
+      return `[${i}]unknown`;
+    });
+    // Collect all text from API content blocks
+    const apiTextBlocks = blocks
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text);
+    const apiFullText = apiTextBlocks.join("\n");
+    const deltaBuffer = ctx.state.deltaBuffer;
+    const cumText = ctx.state.cumulativeStreamedText;
+    // Check if deltaBuffer matches the last text block (for single-block messages)
+    const lastApiText = apiTextBlocks.length > 0 ? apiTextBlocks[apiTextBlocks.length - 1] : "";
+    const deltaMatchesApi = deltaBuffer === lastApiText;
+    const apiFirst80 = apiFullText.slice(0, 80).replace(/\n/g, "\\n");
+    const deltaFirst80 = deltaBuffer.slice(0, 80).replace(/\n/g, "\\n");
+    const cumFirst80 = cumText.slice(0, 80).replace(/\n/g, "\\n");
+    ctx.log.debug(`[DIAG2] message_end blocks=${blocks.length} ${blockSummary.join(" | ")}`);
+    ctx.log.debug(
+      `[DIAG2] deltaBuffer=${deltaBuffer.length}ch deltaMatchesApi=${deltaMatchesApi} apiText=${apiFullText.length}ch textBlocks=${apiTextBlocks.length}`,
+    );
+    if (!deltaMatchesApi || apiTextBlocks.length > 1) {
+      ctx.log.debug(`[DIAG2] API first 80: "${apiFirst80}"`);
+      ctx.log.debug(`[DIAG2] delta first 80: "${deltaFirst80}"`);
+      ctx.log.debug(`[DIAG2] cumulative first 80: "${cumFirst80}"`);
+    }
+    // Also write to raw stream for post-hoc analysis
+    appendRawStream({
+      ts: Date.now(),
+      event: "diag2_message_end_pre_promote",
+      runId: ctx.params.runId,
+      sessionId: (ctx.params.session as { id?: string }).id,
+      blockCount: blocks.length,
+      blockTypes: blocks.map((b) => b.type),
+      textBlockLengths: apiTextBlocks.map((t) => t.length),
+      deltaBufferLength: deltaBuffer.length,
+      deltaMatchesApi,
+      apiFirst200: apiFullText.slice(0, 200),
+      deltaFirst200: deltaBuffer.slice(0, 200),
+      cumulativeFirst200: cumText.slice(0, 200),
+    });
+
+    // [DIAG4] Garble detection heuristic: look for "sentence.[a-z]" pattern (period followed
+    // immediately by lowercase letter, which is a known garble signature).
+    const garblePattern = /\w\.[a-z]/;
+    const apiShort = apiFullText.slice(0, 500);
+    if (garblePattern.test(apiShort) && !deltaMatchesApi) {
+      ctx.log.debug(
+        `[DIAG4] ⚠️ GARBLE DETECTED in API text! deltaBuffer(${deltaBuffer.length}) != apiText(${apiFullText.length})`,
+      );
+      ctx.log.debug(`[DIAG4] API full text first 500: "${apiShort.replace(/\n/g, "\\n")}"`);
+      ctx.log.debug(
+        `[DIAG4] deltaBuffer full first 500: "${deltaBuffer.slice(0, 500).replace(/\n/g, "\\n")}"`,
+      );
+      ctx.log.debug(
+        `[DIAG4] cumulative full first 500: "${cumText.slice(0, 500).replace(/\n/g, "\\n")}"`,
+      );
+      appendRawStream({
+        ts: Date.now(),
+        event: "diag4_garble_detected",
+        runId: ctx.params.runId,
+        sessionId: (ctx.params.session as { id?: string }).id,
+        apiFullLength: apiFullText.length,
+        deltaBufferLength: deltaBuffer.length,
+        apiFirst500: apiShort,
+        deltaFirst500: deltaBuffer.slice(0, 500),
+        cumulativeFirst500: cumText.slice(0, 500),
+      });
+    }
+  }
+
   promoteThinkingTagsToBlocks(assistantMessage);
 
   const rawText = extractAssistantText(assistantMessage);
