@@ -101,6 +101,12 @@ export function handleMessageUpdate(
       ctx.emitBlockChunk(ctx.state.blockBuffer);
       ctx.state.blockBuffer = "";
     }
+    // Reset per-block streaming accumulators. After this reset, partial reply
+    // consumers (onPartialReply, onAgentEvent) will see per-block text, not
+    // cumulative message text. This is correct for streaming: each content block
+    // starts its own text progression. The backward-movement guard (below) is
+    // safe because previousCleaned will be "" after reset, short-circuiting the
+    // startsWith check.
     ctx.state.deltaBuffer = "";
     ctx.state.lastStreamedAssistantCleaned = undefined;
     ctx.state.emittedAssistantUpdate = false;
