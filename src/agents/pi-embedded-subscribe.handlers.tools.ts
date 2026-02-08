@@ -1,6 +1,7 @@
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import type { EmbeddedPiSubscribeContext } from "./pi-embedded-subscribe.handlers.types.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
+import { createInlineCodeState } from "../markdown/code-spans.js";
 import { normalizeTextForComparison } from "./pi-embedded-helpers.js";
 import { isMessagingTool, isMessagingToolSendAction } from "./pi-embedded-messaging.js";
 import {
@@ -45,6 +46,24 @@ export async function handleToolExecutionStart(
   if (ctx.params.onBlockReplyFlush) {
     void ctx.params.onBlockReplyFlush();
   }
+
+  // Insert a double-newline separator in the cumulative text buffer so that text
+  // streamed before the tool call doesn't smash into text streamed after it.
+  // The SDK delivers all text within a single content block (contentIndex 0) even
+  // across tool calls, so the content-block-boundary logic doesn't trigger here.
+  // We also reset per-segment streaming accumulators so the dedup logic in
+  // handleMessageUpdate starts fresh for the post-tool text segment.
+  if (ctx.state.cumulativeStreamedText.length > 0) {
+    ctx.state.cumulativeStreamedText += "\n\n";
+  }
+  ctx.state.deltaBuffer = "";
+  ctx.state.lastStreamedAssistantCleaned = undefined;
+  ctx.state.emittedAssistantUpdate = false;
+  ctx.state.partialBlockState = {
+    thinking: false,
+    final: false,
+    inlineCode: createInlineCodeState(),
+  };
 
   const rawToolName = String(evt.toolName);
   const toolName = normalizeToolName(rawToolName);
