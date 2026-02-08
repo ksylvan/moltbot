@@ -83,6 +83,21 @@ export function handleMessageUpdate(
     content,
   });
 
+  // Guard: ignore late events from content blocks we've already moved past.
+  // After a content block boundary reset, a stale `text_end` from the previous
+  // block would carry full block-1 content. With an empty deltaBuffer the dedup
+  // logic would re-append it, recreating the overlap.
+  if (
+    contentIndex >= 0 &&
+    ctx.state.currentTextContentIndex >= 0 &&
+    contentIndex < ctx.state.currentTextContentIndex
+  ) {
+    ctx.log.debug(
+      `Ignoring late event from content block ${contentIndex} (current: ${ctx.state.currentTextContentIndex})`,
+    );
+    return;
+  }
+
   // Content block boundary: when the provider's contentIndex changes, we know a
   // new text block has started.  Flush / reset per-block accumulators so the new
   // block streams cleanly without deduplication comparing against stale text.
@@ -115,6 +130,12 @@ export function handleMessageUpdate(
       final: false,
       inlineCode: createInlineCodeState(),
     };
+    // Note: blockState is NOT reset here — it tracks cumulative tag state across
+    // the entire message (e.g. a <think> opened in block 1 must still be tracked
+    // in block 2). Only partialBlockState is per-block.
+    ctx.log.debug(
+      `Content block ${contentIndex} started (previous was ${ctx.state.currentTextContentIndex})`,
+    );
   }
 
   // Track the current content block index.
