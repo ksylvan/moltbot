@@ -4,6 +4,7 @@ import { emitAgentEvent } from "../infra/agent-events.js";
 import { createInlineCodeState } from "../markdown/code-spans.js";
 import { normalizeTextForComparison } from "./pi-embedded-helpers.js";
 import { isMessagingTool, isMessagingToolSendAction } from "./pi-embedded-messaging.js";
+import { appendRawStream } from "./pi-embedded-subscribe.raw-stream.js";
 import {
   extractToolErrorMessage,
   extractToolResultText,
@@ -53,9 +54,23 @@ export async function handleToolExecutionStart(
   // across tool calls, so the content-block-boundary logic doesn't trigger here.
   // We also reset per-segment streaming accumulators so the dedup logic in
   // handleMessageUpdate starts fresh for the post-tool text segment.
+  const cumulativeLenBefore = ctx.state.cumulativeStreamedText.length;
   if (ctx.state.cumulativeStreamedText.length > 0) {
     ctx.state.cumulativeStreamedText += "\n\n";
   }
+  appendRawStream({
+    ts: Date.now(),
+    event: "diag_tool_exec_start_separator",
+    runId: ctx.params.runId,
+    sessionId: (ctx.params.session as { id?: string }).id,
+    toolName: String(evt.toolName),
+    cumulativeLenBefore,
+    cumulativeLenAfter: ctx.state.cumulativeStreamedText.length,
+    separatorAdded: cumulativeLenBefore > 0,
+    deltaBufferLen: ctx.state.deltaBuffer.length,
+    cumulativeFirst80: ctx.state.cumulativeStreamedText.slice(0, 80),
+    cumulativeLast80: ctx.state.cumulativeStreamedText.slice(-80),
+  });
   ctx.state.deltaBuffer = "";
   ctx.state.lastStreamedAssistantCleaned = undefined;
   ctx.state.emittedAssistantUpdate = false;

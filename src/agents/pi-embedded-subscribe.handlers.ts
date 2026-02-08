@@ -21,6 +21,9 @@ import {
 
 export function createEmbeddedPiSessionEventHandler(ctx: EmbeddedPiSubscribeContext) {
   return (evt: EmbeddedPiSubscribeEvent) => {
+    if (evt.type === "tool_execution_start" || evt.type === "tool_execution_end") {
+      console.error(`[DIAG-TOOL-EVT] ${evt.type} runId=${ctx.params.runId?.slice(0, 8)}`);
+    }
     switch (evt.type) {
       case "message_start":
         handleMessageStart(ctx, evt as never);
