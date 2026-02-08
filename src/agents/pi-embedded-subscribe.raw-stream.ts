@@ -29,12 +29,12 @@ export function appendRawStream(payload: Record<string, unknown>) {
     rawStreamReady = true;
     try {
       fs.mkdirSync(path.dirname(_path), { recursive: true });
-    } catch {
-      // ignore raw stream mkdir failures
+    } catch (err) {
+      console.error(`[raw-stream] mkdir failed for ${path.dirname(_path)}:`, err);
     }
   }
   try {
-    void fs.promises.appendFile(_path, `${JSON.stringify(payload)}\n`);
+    fs.appendFileSync(_path, `${JSON.stringify(payload)}\n`);
   } catch {
     // ignore raw stream write failures
   }
