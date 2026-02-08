@@ -48,6 +48,7 @@ export type EmbeddedPiSubscribeState = {
   lastAssistantTextTrimmed?: string;
   assistantTextBaseline: number;
   suppressBlockChunks: boolean;
+  currentTextContentIndex: number;
   lastReasoningSent?: string;
 
   compactionInFlight: boolean;

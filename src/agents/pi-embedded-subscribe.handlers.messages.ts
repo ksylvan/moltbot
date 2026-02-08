@@ -70,6 +70,8 @@ export function handleMessageUpdate(
 
   const delta = typeof assistantRecord?.delta === "string" ? assistantRecord.delta : "";
   const content = typeof assistantRecord?.content === "string" ? assistantRecord.content : "";
+  const contentIndex =
+    typeof assistantRecord?.contentIndex === "number" ? assistantRecord.contentIndex : -1;
 
   appendRawStream({
     ts: Date.now(),
@@ -81,11 +83,17 @@ export function handleMessageUpdate(
     content,
   });
 
-  // Content block boundary: when a new text_start arrives while deltaBuffer still
-  // holds content from a previous block, reset per-block accumulators so the new
+  // Content block boundary: when the provider's contentIndex changes, we know a
+  // new text block has started.  Flush / reset per-block accumulators so the new
   // block streams cleanly without deduplication comparing against stale text.
-  if (evtType === "text_start" && ctx.state.deltaBuffer.length > 0) {
-    ctx.log.debug("Content block boundary: resetting deltaBuffer for new text_start");
+  if (
+    contentIndex >= 0 &&
+    contentIndex !== ctx.state.currentTextContentIndex &&
+    ctx.state.currentTextContentIndex >= 0
+  ) {
+    ctx.log.debug(
+      `Content block transition: index ${ctx.state.currentTextContentIndex} → ${contentIndex}`,
+    );
     if (ctx.blockChunker) {
       ctx.blockChunker.drain({ force: true, emit: ctx.emitBlockChunk });
       ctx.blockChunker.reset();
@@ -101,6 +109,11 @@ export function handleMessageUpdate(
       final: false,
       inlineCode: createInlineCodeState(),
     };
+  }
+
+  // Track the current content block index.
+  if (contentIndex >= 0) {
+    ctx.state.currentTextContentIndex = contentIndex;
   }
 
   let chunk = "";
