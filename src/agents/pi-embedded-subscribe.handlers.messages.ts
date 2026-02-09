@@ -155,6 +155,45 @@ export function handleMessageUpdate(
     content,
   });
 
+  // ── Time-gap separator (fallback for missing tool_execution_start events) ──
+  // The SDK sometimes fails to deliver tool_execution_start events to our
+  // subscribe handler, so the separator logic in handleToolExecutionStart never
+  // fires.  Detect the gap by timestamp: if >2s elapsed since the last text
+  // event, tools almost certainly ran in between.  Insert the same "\n\n"
+  // separator and reset per-segment accumulators.
+  const now = Date.now();
+  const TEXT_GAP_THRESHOLD_MS = 2000;
+  if (
+    ctx.state.lastTextEventTs > 0 &&
+    now - ctx.state.lastTextEventTs > TEXT_GAP_THRESHOLD_MS &&
+    ctx.state.cumulativeStreamedText.length > 0
+  ) {
+    ctx.log.debug(
+      `[TIME-GAP-SEP] ${now - ctx.state.lastTextEventTs}ms gap detected, inserting separator ` +
+        `(cumLen=${ctx.state.cumulativeStreamedText.length}, deltaBufferLen=${ctx.state.deltaBuffer.length})`,
+    );
+    appendRawStream({
+      ts: now,
+      event: "diag_time_gap_separator",
+      runId: ctx.params.runId,
+      sessionId: (ctx.params.session as { id?: string }).id,
+      gapMs: now - ctx.state.lastTextEventTs,
+      cumulativeLen: ctx.state.cumulativeStreamedText.length,
+    });
+    ctx.state.cumulativeStreamedText += "\n\n";
+    // Reset per-segment streaming accumulators so dedup logic starts fresh
+    // for the post-tool text segment (same as handleToolExecutionStart does).
+    ctx.state.deltaBuffer = "";
+    ctx.state.lastStreamedAssistantCleaned = undefined;
+    ctx.state.emittedAssistantUpdate = false;
+    ctx.state.partialBlockState = {
+      thinking: false,
+      final: false,
+      inlineCode: createInlineCodeState(),
+    };
+  }
+  ctx.state.lastTextEventTs = now;
+
   // Guard: ignore late events from content blocks we've already moved past.
   // After a content block boundary reset, a stale `text_end` from the previous
   // block would carry full block-1 content. With an empty deltaBuffer the dedup
