@@ -53,6 +53,10 @@ export type EmbeddedPiSubscribeState = {
   currentTextContentIndex: number;
   cumulativeStreamedText: string;
   lastReasoningSent?: string;
+  /** Timestamp of the last text_delta/text_start/text_end event (ms since epoch).
+   *  Used to detect tool-execution gaps within a single content block and
+   *  insert separators so text doesn't smush together. */
+  lastTextEventTs: number;
 
   compactionInFlight: boolean;
   pendingCompactionRetry: number;

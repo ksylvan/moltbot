@@ -63,6 +63,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     currentTextContentIndex: -1,
     cumulativeStreamedText: "",
     lastReasoningSent: undefined,
+    lastTextEventTs: 0,
     compactionInFlight: false,
     pendingCompactionRetry: 0,
     compactionRetryResolve: undefined,
